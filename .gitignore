@@ -1,0 +1,15 @@
+#datasets
+/taiko.db3
+/exported_all_db
+database.md
+
+#build artifacts
+ekiben-agent.exe
+traffic.log
+ekiben-agent.exe~
+
+#IDE
+/.vscode/
+
+#Other
+asd.txt
