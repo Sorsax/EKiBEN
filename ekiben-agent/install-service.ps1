@@ -57,18 +57,39 @@ if ($AllowWrite) {
 
 $binPath = '"' + $exe + '" ' + ($args -join ' ')
 
-Write-Host "Installing service '$ServiceName' with:"
+Write-Host "Preparing service '$ServiceName' with:"
 Write-Host $binPath
 
-sc.exe stop $ServiceName | Out-Null
-sc.exe delete $ServiceName | Out-Null
+# If the service already exists, stop it and update its binPath; otherwise create it.
+$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($null -ne $svc) {
+  Write-Host "Service '$ServiceName' exists; updating configuration."
+  if ($svc.Status -ne 'Stopped') {
+    Write-Host "Stopping service..."
+    try {
+      Stop-Service -Name $ServiceName -Force -ErrorAction Stop
+    } catch {
+      Write-Host "Stop-Service failed, attempting sc.exe stop"
+      sc.exe stop $ServiceName | Out-Null
+    }
+    Start-Sleep -Seconds 2
+  }
 
-sc.exe create $ServiceName binPath= $binPath start= auto DisplayName= "Ekiben Agent" | Out-Null
-sc.exe description $ServiceName "Outbound WebSocket agent for EKiBEN SQLite access" | Out-Null
+  Write-Host "Updating service binary path and start mode..."
+  sc.exe config $ServiceName binPath= $binPath start= auto | Out-Null
+  sc.exe description $ServiceName "Outbound WebSocket agent for EKiBEN SQLite access" | Out-Null
 
-Write-Host "Service installed. Start it with:"
-Write-Host "  sc.exe start $ServiceName"
+  Write-Host "Service updated. Start it with:"
+  Write-Host "  sc.exe start $ServiceName"
+} else {
+  Write-Host "Service not found; creating new service."
+  sc.exe create $ServiceName binPath= $binPath start= auto | Out-Null
+  sc.exe description $ServiceName "Outbound WebSocket agent for EKiBEN SQLite access" | Out-Null
 
-Write-Host "To uninstall later, run:"
+  Write-Host "Service installed. Start it with:"
+  Write-Host "  sc.exe start $ServiceName"
+}
+
+Write-Host "To uninstall later, run uninstall-service.ps1 or:"
 Write-Host "  sc.exe stop $ServiceName"
 Write-Host "  sc.exe delete $ServiceName"

@@ -19,7 +19,6 @@ import (
 
 const version = "0.1.0"
 
-
 type Agent struct {
 	cfg    config.Config
 	db     *sql.DB
@@ -60,89 +59,89 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) connectOnce(ctx context.Context) error {
-		headers := http.Header{}
-		headers.Set("Authorization", "Bearer "+a.cfg.Token)
-		headers.Set("X-Agent-Id", a.cfg.AgentID)
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+a.cfg.Token)
+	headers.Set("X-Agent-Id", a.cfg.AgentID)
 
-		dialer := websocket.Dialer{}
-		conn, _, err := dialer.DialContext(ctx, a.cfg.ControllerURL, headers)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
+	dialer := websocket.Dialer{}
+	conn, _, err := dialer.DialContext(ctx, a.cfg.ControllerURL, headers)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
 
-		register := protocol.Envelope{
-			Type:    "register",
-			AgentID: a.cfg.AgentID,
-			Version: version,
-			Meta: map[string]any{
-				"allowWrite": a.cfg.AllowWrite,
-				"dbPath":     a.cfg.DBPath,
-			},
-		}
-		if a.cfg.LogTraffic {
-			a.logJSON("tx register", register)
-		}
-		if err := conn.WriteJSON(register); err != nil {
-			return err
-		}
+	register := protocol.Envelope{
+		Type:    "register",
+		AgentID: a.cfg.AgentID,
+		Version: version,
+		Meta: map[string]any{
+			"allowWrite": a.cfg.AllowWrite,
+			"dbPath":     a.cfg.DBPath,
+		},
+	}
+	if a.cfg.LogTraffic {
+		a.logJSON("tx register", register)
+	}
+	if err := conn.WriteJSON(register); err != nil {
+		return err
+	}
 
-		pingTicker := time.NewTicker(a.cfg.PingInterval)
-		defer pingTicker.Stop()
+	pingTicker := time.NewTicker(a.cfg.PingInterval)
+	defer pingTicker.Stop()
 
-		readCh := make(chan readResult, 1)
-		readCtx, cancelRead := context.WithCancel(ctx)
-		defer cancelRead()
+	readCh := make(chan readResult, 1)
+	readCtx, cancelRead := context.WithCancel(ctx)
+	defer cancelRead()
 
+	conn.SetReadDeadline(time.Now().Add(a.cfg.PingInterval * 2))
+	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(a.cfg.PingInterval * 2))
-		conn.SetPongHandler(func(string) error {
-			conn.SetReadDeadline(time.Now().Add(a.cfg.PingInterval * 2))
+		return nil
+	})
+
+	go a.readLoop(readCtx, conn, readCh)
+
+	for {
+		select {
+		case <-ctx.Done():
 			return nil
-		})
-
-		go a.readLoop(readCtx, conn, readCh)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-pingTicker.C:
-				_ = conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(3*time.Second))
-			case msg := <-readCh:
-				if msg.err != nil {
-					return msg.err
-				}
-				if a.cfg.LogTraffic {
-					a.logRaw("rx", msg.data)
-				}
-				if err := a.handleMessage(ctx, conn, msg.data); err != nil {
-					a.logger.Printf("handle message: %v", err)
-				}
+		case <-pingTicker.C:
+			_ = conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(3*time.Second))
+		case msg := <-readCh:
+			if msg.err != nil {
+				return msg.err
+			}
+			if a.cfg.LogTraffic {
+				a.logRaw("rx", msg.data)
+			}
+			if err := a.handleMessage(ctx, conn, msg.data); err != nil {
+				a.logger.Printf("handle message: %v", err)
 			}
 		}
+	}
 }
 
-	type readResult struct {
-		data []byte
-		err  error
-	}
+type readResult struct {
+	data []byte
+	err  error
+}
 
-	func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, out chan<- readResult) {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				out <- readResult{err: err}
-				return
-			}
-			out <- readResult{data: data}
+func (a *Agent) readLoop(ctx context.Context, conn *websocket.Conn, out chan<- readResult) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
+
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			out <- readResult{err: err}
+			return
+		}
+		out <- readResult{data: data}
 	}
+}
 
 func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []byte) error {
 	var env protocol.Envelope
