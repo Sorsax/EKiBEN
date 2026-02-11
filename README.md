@@ -68,7 +68,3 @@ That's it! The agent will connect to your controller and do its thing.
 
 - Cross-machine player data: If multiple machines run EKiBEN, player data can sync (if both sides agree)
 - Custom song support: EKiBEN will have the capability to convert TJA and BMS files to the format used by the game. For legal reasons you should not use this on an actual cabinet, but it's there :P
-
----
-
-EKiBEN makes TLS setups more capable and flexible. Use it where you should, and enjoy the extra features!
