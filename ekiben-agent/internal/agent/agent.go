@@ -6,6 +6,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"database/sql"
@@ -17,7 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 type Agent struct {
 	cfg    config.Config
@@ -77,6 +81,9 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 		Meta: map[string]any{
 			"allowWrite": a.cfg.AllowWrite,
 			"dbPath":     a.cfg.DBPath,
+			"service":    a.cfg.ServiceName,
+			"updateRepo": a.cfg.UpdateRepo,
+			"updateAsset": a.cfg.UpdateAsset,
 		},
 	}
 	if a.cfg.LogTraffic {
@@ -158,6 +165,27 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 	switch env.Method {
 	case "ping":
 		resp.Result = map[string]any{"pong": true, "version": version}
+	case "version.get":
+		resp.Result = map[string]any{"version": version}
+	case "update.check":
+		result, err := a.checkUpdate(ctx)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "update_error", Message: err.Error()}
+			break
+		}
+		resp.Result = result
+	case "update.apply":
+		var params protocol.UpdateApplyParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		result, err := a.applyUpdate(ctx, params.Force)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "update_error", Message: err.Error()}
+			break
+		}
+		resp.Result = result
 	case "query":
 		var params protocol.QueryParams
 		if err := json.Unmarshal(env.Params, &params); err != nil {
@@ -246,6 +274,132 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		a.logJSON("tx response", resp)
 	}
 	return conn.WriteJSON(resp)
+}
+
+func (a *Agent) checkUpdate(ctx context.Context) (map[string]any, error) {
+	repo := strings.TrimSpace(a.cfg.UpdateRepo)
+	asset := strings.TrimSpace(a.cfg.UpdateAsset)
+	if repo == "" || asset == "" {
+		return nil, errors.New("update repo or asset not configured")
+	}
+
+	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "ekiben-agent")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("github api error: " + resp.Status)
+	}
+
+	var payload struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	assetURL := ""
+	for _, item := range payload.Assets {
+		if strings.EqualFold(item.Name, asset) {
+			assetURL = item.URL
+			break
+		}
+	}
+	if assetURL == "" {
+		return map[string]any{
+			"current":     version,
+			"latest":      payload.TagName,
+			"downloadUrl": "",
+			"update":      false,
+			"reason":      "asset not found",
+		}, nil
+	}
+
+	current := normalizeVersion(version)
+	latest := normalizeVersion(payload.TagName)
+	update := latest != "" && current != "" && latest != current
+	return map[string]any{
+		"current":     version,
+		"latest":      payload.TagName,
+		"downloadUrl": assetURL,
+		"update":      update,
+	}, nil
+}
+
+func (a *Agent) applyUpdate(ctx context.Context, force bool) (map[string]any, error) {
+	repo := strings.TrimSpace(a.cfg.UpdateRepo)
+	asset := strings.TrimSpace(a.cfg.UpdateAsset)
+	service := strings.TrimSpace(a.cfg.ServiceName)
+	if repo == "" || asset == "" || service == "" {
+		return nil, errors.New("update repo, asset, or service name not configured")
+	}
+
+	if !force {
+		info, err := a.checkUpdate(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if update, ok := info["update"].(bool); ok && !update {
+			return map[string]any{"started": false, "reason": "up-to-date"}, nil
+		}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	baseDir := filepath.Dir(exe)
+	updaterPath := filepath.Join(baseDir, "updater.exe")
+
+	if _, err := os.Stat(updaterPath); err != nil {
+		return nil, errors.New("updater.exe not found in agent folder")
+	}
+
+	args := []string{
+		"--repo", repo,
+		"--asset", asset,
+		"--service", service,
+		"--dir", baseDir,
+		"--log", filepath.Join(baseDir, "updater.log"),
+	}
+
+	cmd := exec.Command(updaterPath, args...)
+	cmd.Dir = baseDir
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		// Allow the response to be sent, then exit to release the exe file.
+		time.Sleep(750 * time.Millisecond)
+		os.Exit(0)
+	}()
+
+	if force {
+		return map[string]any{"started": true, "force": true}, nil
+	}
+	return map[string]any{"started": true}, nil
+}
+
+func normalizeVersion(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	return v
 }
 
 func (a *Agent) logJSON(label string, payload any) {

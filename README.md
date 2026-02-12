@@ -22,6 +22,7 @@ For copyright reasons, I will not provide any front-end assets. If you have a le
 3. Extract everything from the zip into that folder.
 4. Inside, you'll see:
    - `ekiben-agent.exe` (the main program)
+   - `updater.exe` (for remotely updating the agent)
    - `agent.config.psd1` (service config file, only for running as a Windows service)
    - `install-service.ps1` (script to install the agent as a Windows service)
    - `uninstall-service.ps1` (script to remove the Windows service)
@@ -37,8 +38,11 @@ For copyright reasons, I will not provide any front-end assets. If you have a le
 | Controller  | wss://your-controller.example/ws           | WebSocket URL of your EKiBEN controller           |
 | Token       | YOUR_AGENT_TOKEN                           | Authentication token for this agent               |
 | AgentId     | agent-001                                  | Unique name for this agent                        |
-| DbPath      | C:\\EKiBEN\\taiko.db3      | Full path to your TLS database file               |
-| AllowWrite  | $false                                     | $true to allow remote writes, $false to block     |
+| DbPath      | C:\\EKiBEN\\taiko.db3                   | Full path to your TLS database file               |
+| AllowWrite  | $false                                     | $true to allow remote writes                      |
+| LogTraffic  | $false                                     | $true to log all websocket traffic to console     |
+| UpdateRepo  | Sorsax/EKiBEN                              | GitHub repo for releases (owner/name)             |
+| UpdateAsset | ekiben-agent.zip                           | Release asset to download for updates             |
 | Ping        | 20s                                        | How often to ping the controller                  |
 | Reconnect   | 5s                                         | Wait time before reconnecting                     |
 | Timeout     | 10s                                        | Request timeout                                   |

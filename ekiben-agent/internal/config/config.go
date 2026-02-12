@@ -13,6 +13,9 @@ type Config struct {
 	DBPath         string
 	AllowWrite     bool
 	LogTraffic     bool
+	ServiceName    string
+	UpdateRepo     string
+	UpdateAsset    string
 	PingInterval   time.Duration
 	ReconnectDelay time.Duration
 	RequestTimeout time.Duration
@@ -27,6 +30,9 @@ func FromFlags() Config {
 	flag.StringVar(&cfg.DBPath, "db", getEnv("EKIBEN_DB", ""), "path to taiko.db3")
 	flag.BoolVar(&cfg.AllowWrite, "allow-write", getEnvBool("EKIBEN_ALLOW_WRITE", false), "allow write queries")
 	flag.BoolVar(&cfg.LogTraffic, "log-traffic", getEnvBool("EKIBEN_LOG_TRAFFIC", false), "log websocket traffic")
+	flag.StringVar(&cfg.ServiceName, "service", getEnv("EKIBEN_SERVICE", "EkibenAgent"), "windows service name")
+	flag.StringVar(&cfg.UpdateRepo, "update-repo", getEnv("EKIBEN_UPDATE_REPO", "Sorsax/EKiBEN"), "github repo owner/name")
+	flag.StringVar(&cfg.UpdateAsset, "update-asset", getEnv("EKIBEN_UPDATE_ASSET", "ekiben-agent.zip"), "github release asset name")
 	flag.DurationVar(&cfg.PingInterval, "ping", getEnvDuration("EKIBEN_PING", 20*time.Second), "ping interval")
 	flag.DurationVar(&cfg.ReconnectDelay, "reconnect", getEnvDuration("EKIBEN_RECONNECT", 5*time.Second), "reconnect delay")
 	flag.DurationVar(&cfg.RequestTimeout, "timeout", getEnvDuration("EKIBEN_TIMEOUT", 10*time.Second), "request timeout")

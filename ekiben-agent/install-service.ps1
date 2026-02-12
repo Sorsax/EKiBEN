@@ -6,6 +6,7 @@ param(
   [string]$AgentId,
   [string]$DbPath,
   [bool]$AllowWrite,
+  [bool]$LogTraffic,
   [string]$Ping,
   [string]$Reconnect,
   [string]$Timeout
@@ -25,6 +26,8 @@ if (-not $PSBoundParameters.ContainsKey("Token") -and $config.ContainsKey("Token
 if (-not $PSBoundParameters.ContainsKey("AgentId") -and $config.ContainsKey("AgentId")) { $AgentId = $config.AgentId }
 if (-not $PSBoundParameters.ContainsKey("DbPath") -and $config.ContainsKey("DbPath")) { $DbPath = $config.DbPath }
 if (-not $PSBoundParameters.ContainsKey("AllowWrite") -and $config.ContainsKey("AllowWrite")) { $AllowWrite = [bool]$config.AllowWrite }
+if (-not $PSBoundParameters.ContainsKey("LogTraffic") -and $config.ContainsKey("LogTraffic")) { $LogTraffic = [bool]$config.LogTraffic }
+if (-not $PSBoundParameters.ContainsKey("ServiceName") -and $config.ContainsKey("ServiceName")) { $ServiceName = $config.ServiceName }
 if (-not $PSBoundParameters.ContainsKey("Ping") -and $config.ContainsKey("Ping")) { $Ping = $config.Ping }
 if (-not $PSBoundParameters.ContainsKey("Reconnect") -and $config.ContainsKey("Reconnect")) { $Reconnect = $config.Reconnect }
 if (-not $PSBoundParameters.ContainsKey("Timeout") -and $config.ContainsKey("Timeout")) { $Timeout = $config.Timeout }
@@ -48,11 +51,18 @@ $args = @(
   "--db", $DbPath,
   "--ping", $Ping,
   "--reconnect", $Reconnect,
-  "--timeout", $Timeout
+  "--timeout", $Timeout,
+  "--service", $ServiceName,
+  "--update-repo", $config.UpdateRepo,
+  "--update-asset", $config.UpdateAsset
 )
 
 if ($AllowWrite) {
   $args += "--allow-write"
+}
+
+if ($LogTraffic) {
+  $args += "--log-traffic"
 }
 
 $binPath = '"' + $exe + '" ' + ($args -join ' ')

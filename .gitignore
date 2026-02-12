@@ -4,13 +4,16 @@
 database.md
 
 #build artifacts
-ekiben-agent.exe
-traffic.log
-ekiben-agent.exe~
+/ekiben-agent/ekiben-agent.exe
+/ekiben-agent/updater.exe
+/ekiben-agent/traffic.log
+/ekiben-agent/updater.log
+/ekiben-agent/ekiben-agent.exe~
+ekiben-agent.zip
 
 #IDE
 /.vscode/
 
 #Other
 asd.txt
-info.md
+INFO2.md
