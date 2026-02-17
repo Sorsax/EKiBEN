@@ -27,10 +27,7 @@ New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
 $files = @(
   "ekiben-agent.exe",
-  "agent.config.psd1",
-  "install-service.ps1",
-  "uninstall-service.ps1",
-  "start.bat"
+  "agent-config.example.json"
 )
 
 foreach ($file in $files) {
