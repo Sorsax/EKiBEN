@@ -3,25 +3,42 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
 	"ekiben-agent/internal/agent"
+	"ekiben-agent/internal/console"
 	"ekiben-agent/internal/config"
 	"ekiben-agent/internal/db"
+	"ekiben-agent/internal/logger"
+	"ekiben-agent/internal/version"
 )
 
 func main() {
 	cfg := config.FromFlags()
+	useColor := console.EnableANSI()
+	log := logger.New(os.Stdout, cfg.LogTraffic, useColor)
+	console.SetTitle("EKiBEN Agent")
 
-	logger := log.New(os.Stdout, "agent ", log.LstdFlags|log.Lmicroseconds)
+	// Determine environment from version
+	environment := "Development"
+	if strings.HasPrefix(version.Version, "SR") {
+		environment = "Production"
+	}
+
+	// Print startup banner
+	log.Headerf("EKiBEN Agent version %s", log.Accent(version.Version))
+	log.Headerf("Environment: %s", log.Accent(environment))
+	log.Infof("Agent starting up...")
+	log.Infof("DB path: %s", log.Accent(cfg.DBPath))
+	log.Infof("Press Ctrl+C to shut down")
+
 	cfg.SourceMode = strings.TrimSpace(strings.ToLower(cfg.SourceMode))
 
 	if cfg.SourceMode == "" {
-		logger.Fatal("missing required --source (direct|api)")
+		log.Fatalf("missing required --source (direct|api)")
 	}
 
 	var sqlDB *sql.DB
@@ -32,23 +49,23 @@ func main() {
 	case "direct":
 		sqlDB, err = db.Open(cfg.DBPath)
 		if err != nil {
-			logger.Fatalf("open db: %v", err)
+			log.Fatalf("open db: %v", err)
 		}
 		defer sqlDB.Close()
 	case "api":
 		apiClient, err = db.NewAPIClient(cfg.APIBaseURL, cfg.APIToken)
 		if err != nil {
-			logger.Fatalf("configure tls api client: %v", err)
+			log.Fatalf("configure tls api client: %v", err)
 		}
 	default:
-		logger.Fatalf("invalid --source %q (expected direct or api)", cfg.SourceMode)
+		log.Fatalf("invalid --source %q (expected direct or api)", cfg.SourceMode)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ag := agent.New(cfg, sqlDB, apiClient, logger)
+	ag := agent.New(cfg, sqlDB, apiClient, log)
 	if err := ag.Run(ctx); err != nil {
-		logger.Fatalf("agent exited: %v", err)
+		log.Fatalf("agent exited: %v", err)
 	}
 }

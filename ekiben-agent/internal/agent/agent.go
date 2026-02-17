@@ -4,30 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"database/sql"
 
 	"ekiben-agent/internal/config"
 	"ekiben-agent/internal/db"
+	"ekiben-agent/internal/logger"
 	"ekiben-agent/internal/protocol"
+	"ekiben-agent/internal/version"
 
 	"github.com/gorilla/websocket"
 )
-
-const version = "0.1.1"
 
 type Agent struct {
 	cfg    config.Config
 	db     *sql.DB
 	api    *db.APIClient
-	logger *log.Logger
+	logger *logger.Logger
 }
 
-func New(cfg config.Config, sqlDB *sql.DB, apiClient *db.APIClient, logger *log.Logger) *Agent {
-	return &Agent{cfg: cfg, db: sqlDB, api: apiClient, logger: logger}
+func New(cfg config.Config, sqlDB *sql.DB, apiClient *db.APIClient, log *logger.Logger) *Agent {
+	return &Agent{cfg: cfg, db: sqlDB, api: apiClient, logger: log}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -42,12 +42,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		default:
 		}
 
-		a.logger.Printf("connecting to %s", a.cfg.ControllerURL)
 		err := a.connectOnce(ctx)
 		if err != nil {
-			a.logger.Printf("connection ended: %v", err)
+			a.logger.Warnf("Connection failed: %v", err)
 		}
-		a.logger.Printf("reconnecting in %s", a.cfg.ReconnectDelay)
+		
+		// Only log if we're reconnecting
+		a.logger.Infof("Reconnecting in %s...", a.cfg.ReconnectDelay)
 
 		timer := time.NewTimer(a.cfg.ReconnectDelay)
 		select {
@@ -74,7 +75,7 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 	register := protocol.Envelope{
 		Type:    "register",
 		AgentID: a.cfg.AgentID,
-		Version: version,
+		Version: version.Version,
 		Meta: map[string]any{
 			"allowWrite": a.cfg.AllowWrite,
 			"source":     a.cfg.SourceMode,
@@ -82,9 +83,7 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			"apiBaseUrl": a.cfg.APIBaseURL,
 		},
 	}
-	if a.cfg.LogTraffic {
-		a.logJSON("tx register", register)
-	}
+	a.logger.TrafficTx("register", register)
 	if err := conn.WriteJSON(register); err != nil {
 		return err
 	}
@@ -104,6 +103,12 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 
 	go a.readLoop(readCtx, conn, readCh)
 
+	connected := false
+	controllerType := "Controller"
+	if strings.Contains(a.cfg.ControllerURL, "jido.sorsax.dev") {
+		controllerType = "Jidotachi"
+	}
+	
 	for {
 		select {
 		case <-ctx.Done():
@@ -114,11 +119,16 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			if msg.err != nil {
 				return msg.err
 			}
-			if a.cfg.LogTraffic {
-				a.logRaw("rx", msg.data)
+			
+			// Log successful connection on first message
+			if !connected {
+				a.logger.Infof("Connected to %s successfully", controllerType)
+				connected = true
 			}
+			
+			a.logger.TrafficRx("message", msg.data)
 			if err := a.handleMessage(ctx, conn, msg.data); err != nil {
-				a.logger.Printf("handle message: %v", err)
+				a.logger.Errorf("handle message: %v", err)
 			}
 		}
 	}
@@ -160,9 +170,9 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 
 	switch env.Method {
 	case "ping":
-		resp.Result = map[string]any{"pong": true, "version": version}
+		resp.Result = map[string]any{"pong": true, "version": version.Version}
 	case "version.get":
-		resp.Result = map[string]any{"version": version}
+		resp.Result = map[string]any{"version": version.Version}
 	case "query":
 		var params protocol.QueryParams
 		if err := json.Unmarshal(env.Params, &params); err != nil {
@@ -247,9 +257,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		resp.Error = &protocol.Error{Code: "unknown_method", Message: "unsupported method"}
 	}
 
-	if a.cfg.LogTraffic {
-		a.logJSON("tx response", resp)
-	}
+	a.logger.TrafficTx("response", resp)
 	return conn.WriteJSON(resp)
 }
 
@@ -316,22 +324,4 @@ func (a *Agent) tableDelete(ctx context.Context, table string, filters map[strin
 		return nil, errors.New("database is not configured")
 	}
 	return db.TableDelete(ctx, a.db, table, filters, a.cfg.AllowWrite)
-}
-
-func (a *Agent) logJSON(label string, payload any) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		a.logger.Printf("%s: <marshal error: %v>", label, err)
-		return
-	}
-	a.logRaw(label, data)
-}
-
-func (a *Agent) logRaw(label string, data []byte) {
-	const maxLen = 2000
-	msg := string(data)
-	if len(msg) > maxLen {
-		msg = msg[:maxLen] + "...<truncated>"
-	}
-	a.logger.Printf("%s %s", label, msg)
 }
