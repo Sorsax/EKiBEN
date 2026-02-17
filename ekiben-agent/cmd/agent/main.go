@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
 	"ekiben-agent/internal/agent"
 	"ekiben-agent/internal/console"
@@ -61,10 +63,39 @@ func main() {
 		log.Fatalf("invalid --source %q (expected direct or api)", cfg.SourceMode)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	ag := agent.New(cfg, sqlDB, apiClient, log)
+
+	var shutdownOnce sync.Once
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			log.Infof("Shutting down...")
+			time.Sleep(500 * time.Millisecond)
+			log.Infof("Finishing in-flight writes...")
+			ag.BeginShutdown()
+			if ok := ag.WaitForInflight(10 * time.Second); !ok {
+				log.Warnf("Timed out waiting for in-flight work")
+			}
+			time.Sleep(500 * time.Millisecond)
+			log.Infof("Closing websocket connections...")
+			time.Sleep(500 * time.Millisecond)
+			log.Infof("Exiting...")
+			time.Sleep(3 * time.Second)
+			os.Exit(0)
+		})
+	}
+
+	console.RegisterShutdown(shutdown)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		shutdown()
+	}()
+
 	if err := ag.Run(ctx); err != nil {
 		log.Fatalf("agent exited: %v", err)
 	}

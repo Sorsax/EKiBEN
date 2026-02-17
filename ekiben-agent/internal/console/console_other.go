@@ -9,3 +9,6 @@ func EnableANSI() bool {
 
 // SetTitle is a no-op on non-Windows builds.
 func SetTitle(title string) {}
+
+// RegisterShutdown is a no-op on non-Windows builds.
+func RegisterShutdown(handler func()) {}

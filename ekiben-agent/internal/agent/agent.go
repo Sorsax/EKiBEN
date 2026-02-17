@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"database/sql"
@@ -24,10 +26,36 @@ type Agent struct {
 	db     *sql.DB
 	api    *db.APIClient
 	logger *logger.Logger
+
+	connMu    sync.Mutex
+	conn      *websocket.Conn
+	inflight  sync.WaitGroup
+	shutdown  atomic.Bool
 }
 
 func New(cfg config.Config, sqlDB *sql.DB, apiClient *db.APIClient, log *logger.Logger) *Agent {
 	return &Agent{cfg: cfg, db: sqlDB, api: apiClient, logger: log}
+}
+
+// BeginShutdown signals the agent to stop accepting new work and close connections.
+func (a *Agent) BeginShutdown() {
+	a.shutdown.Store(true)
+	a.closeConn()
+}
+
+// WaitForInflight waits for in-flight work to finish up to the timeout.
+func (a *Agent) WaitForInflight(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		a.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -71,6 +99,8 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 		return err
 	}
 	defer conn.Close()
+	a.setConn(conn)
+	defer a.clearConn(conn)
 
 	register := protocol.Envelope{
 		Type:    "register",
@@ -119,6 +149,9 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			if msg.err != nil {
 				return msg.err
 			}
+			if a.shutdown.Load() {
+				return nil
+			}
 			
 			// Log successful connection on first message
 			if !connected {
@@ -127,11 +160,39 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			}
 			
 			a.logger.TrafficRx("message", msg.data)
-			if err := a.handleMessage(ctx, conn, msg.data); err != nil {
+			a.inflight.Add(1)
+			msgCtx := ctx
+			if a.shutdown.Load() {
+				msgCtx = context.Background()
+			}
+			if err := a.handleMessage(msgCtx, conn, msg.data); err != nil {
 				a.logger.Errorf("handle message: %v", err)
 			}
+			a.inflight.Done()
 		}
 	}
+}
+
+func (a *Agent) setConn(conn *websocket.Conn) {
+	a.connMu.Lock()
+	a.conn = conn
+	a.connMu.Unlock()
+}
+
+func (a *Agent) clearConn(conn *websocket.Conn) {
+	a.connMu.Lock()
+	if a.conn == conn {
+		a.conn = nil
+	}
+	a.connMu.Unlock()
+}
+
+func (a *Agent) closeConn() {
+	a.connMu.Lock()
+	if a.conn != nil {
+		_ = a.conn.Close()
+	}
+	a.connMu.Unlock()
 }
 
 type readResult struct {
