@@ -53,7 +53,3 @@ type TableDeleteParams struct {
 	Table   string         `json:"table"`
 	Filters map[string]any `json:"filters"`
 }
-
-type UpdateApplyParams struct {
-	Force bool `json:"force,omitempty"`
-}

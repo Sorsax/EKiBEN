@@ -5,11 +5,12 @@ database.md
 
 #build artifacts
 /ekiben-agent/ekiben-agent.exe
-/ekiben-agent/updater.exe
 /ekiben-agent/traffic.log
-/ekiben-agent/updater.log
 /ekiben-agent/ekiben-agent.exe~
 ekiben-agent.zip
+
+#configuration
+/ekiben-agent/agent-config.json
 
 #IDE
 /.vscode/

@@ -1,0 +1,14 @@
+{
+  "controller": "wss://your-controller.example/ws/agents",
+  "token": "YOUR_AGENT_TOKEN_HERE",
+  "agentId": "agent-001",
+  "source": "direct",
+  "dbPath": "D:\\Path\\To\\taiko.db3",
+  "apiBaseUrl": "",
+  "apiToken": "",
+  "allowWrite": false,
+  "logTraffic": false,
+  "pingInterval": "20s",
+  "reconnectDelay": "5s",
+  "requestTimeout": "10s"
+}

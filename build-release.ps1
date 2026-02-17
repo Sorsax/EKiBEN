@@ -17,8 +17,6 @@ Push-Location $agentPath
 
 go build -o ekiben-agent.exe ./cmd/agent
 
-go build -o updater.exe ./cmd/updater
-
 Pop-Location
 
 $tmpDir = Join-Path $root "_release_tmp"
@@ -29,7 +27,6 @@ New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
 $files = @(
   "ekiben-agent.exe",
-  "updater.exe",
   "agent.config.psd1",
   "install-service.ps1",
   "uninstall-service.ps1",

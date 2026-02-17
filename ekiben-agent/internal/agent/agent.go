@@ -6,10 +6,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"database/sql"
@@ -26,11 +22,12 @@ const version = "0.1.1"
 type Agent struct {
 	cfg    config.Config
 	db     *sql.DB
+	api    *db.APIClient
 	logger *log.Logger
 }
 
-func New(cfg config.Config, sqlDB *sql.DB, logger *log.Logger) *Agent {
-	return &Agent{cfg: cfg, db: sqlDB, logger: logger}
+func New(cfg config.Config, sqlDB *sql.DB, apiClient *db.APIClient, logger *log.Logger) *Agent {
+	return &Agent{cfg: cfg, db: sqlDB, api: apiClient, logger: logger}
 }
 
 func (a *Agent) Run(ctx context.Context) error {
@@ -80,10 +77,9 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 		Version: version,
 		Meta: map[string]any{
 			"allowWrite": a.cfg.AllowWrite,
+			"source":     a.cfg.SourceMode,
 			"dbPath":     a.cfg.DBPath,
-			"service":    a.cfg.ServiceName,
-			"updateRepo": a.cfg.UpdateRepo,
-			"updateAsset": a.cfg.UpdateAsset,
+			"apiBaseUrl": a.cfg.APIBaseURL,
 		},
 	}
 	if a.cfg.LogTraffic {
@@ -167,25 +163,6 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		resp.Result = map[string]any{"pong": true, "version": version}
 	case "version.get":
 		resp.Result = map[string]any{"version": version}
-	case "update.check":
-		result, err := a.checkUpdate(ctx)
-		if err != nil {
-			resp.Error = &protocol.Error{Code: "update_error", Message: err.Error()}
-			break
-		}
-		resp.Result = result
-	case "update.apply":
-		var params protocol.UpdateApplyParams
-		if err := json.Unmarshal(env.Params, &params); err != nil {
-			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
-			break
-		}
-		result, err := a.applyUpdate(ctx, params.Force)
-		if err != nil {
-			resp.Error = &protocol.Error{Code: "update_error", Message: err.Error()}
-			break
-		}
-		resp.Result = result
 	case "query":
 		var params protocol.QueryParams
 		if err := json.Unmarshal(env.Params, &params); err != nil {
@@ -195,7 +172,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		ctxTimeout, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 		defer cancel()
 
-		result, err := db.QueryNamed(ctxTimeout, a.db, params.Name, params.Args, a.cfg.AllowWrite)
+		result, err := a.queryNamed(ctxTimeout, params.Name, params.Args)
 		if err != nil {
 			resp.Error = &protocol.Error{Code: "db_error", Message: err.Error()}
 			break
@@ -215,7 +192,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 			orderBy = append(orderBy, db.OrderBy{Column: item.Column, Desc: item.Desc})
 		}
 
-		result, err := db.TableSelect(ctxTimeout, a.db, params.Table, params.Columns, params.Filters, orderBy, params.Limit, params.Offset)
+		result, err := a.tableSelect(ctxTimeout, params.Table, params.Columns, params.Filters, orderBy, params.Limit, params.Offset)
 		if err != nil {
 			resp.Error = &protocol.Error{Code: "db_error", Message: err.Error()}
 			break
@@ -230,7 +207,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		ctxTimeout, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 		defer cancel()
 
-		result, err := db.TableInsert(ctxTimeout, a.db, params.Table, params.Values, a.cfg.AllowWrite)
+		result, err := a.tableInsert(ctxTimeout, params.Table, params.Values)
 		if err != nil {
 			resp.Error = &protocol.Error{Code: "db_error", Message: err.Error()}
 			break
@@ -245,7 +222,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		ctxTimeout, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 		defer cancel()
 
-		result, err := db.TableUpdate(ctxTimeout, a.db, params.Table, params.Values, params.Filters, a.cfg.AllowWrite)
+		result, err := a.tableUpdate(ctxTimeout, params.Table, params.Values, params.Filters)
 		if err != nil {
 			resp.Error = &protocol.Error{Code: "db_error", Message: err.Error()}
 			break
@@ -260,7 +237,7 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		ctxTimeout, cancel := context.WithTimeout(ctx, a.cfg.RequestTimeout)
 		defer cancel()
 
-		result, err := db.TableDelete(ctxTimeout, a.db, params.Table, params.Filters, a.cfg.AllowWrite)
+		result, err := a.tableDelete(ctxTimeout, params.Table, params.Filters)
 		if err != nil {
 			resp.Error = &protocol.Error{Code: "db_error", Message: err.Error()}
 			break
@@ -276,130 +253,69 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 	return conn.WriteJSON(resp)
 }
 
-func (a *Agent) checkUpdate(ctx context.Context) (map[string]any, error) {
-	repo := strings.TrimSpace(a.cfg.UpdateRepo)
-	asset := strings.TrimSpace(a.cfg.UpdateAsset)
-	if repo == "" || asset == "" {
-		return nil, errors.New("update repo or asset not configured")
-	}
-
-	url := "https://api.github.com/repos/" + repo + "/releases/latest"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "ekiben-agent")
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.New("github api error: " + resp.Status)
-	}
-
-	var payload struct {
-		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	assetURL := ""
-	for _, item := range payload.Assets {
-		if strings.EqualFold(item.Name, asset) {
-			assetURL = item.URL
-			break
+func (a *Agent) queryNamed(ctx context.Context, name string, args []any) (map[string]any, error) {
+	if a.cfg.SourceMode == "api" {
+		if a.api == nil {
+			return nil, errors.New("api client is not configured")
 		}
+		return a.api.QueryNamed(ctx, name, args, a.cfg.AllowWrite)
 	}
-	if assetURL == "" {
-		return map[string]any{
-			"current":     version,
-			"latest":      payload.TagName,
-			"downloadUrl": "",
-			"update":      false,
-			"reason":      "asset not found",
-		}, nil
+	if a.db == nil {
+		return nil, errors.New("database is not configured")
 	}
-
-	current := normalizeVersion(version)
-	latest := normalizeVersion(payload.TagName)
-	update := latest != "" && current != "" && latest != current
-	return map[string]any{
-		"current":     version,
-		"latest":      payload.TagName,
-		"downloadUrl": assetURL,
-		"update":      update,
-	}, nil
+	return db.QueryNamed(ctx, a.db, name, args, a.cfg.AllowWrite)
 }
 
-func (a *Agent) applyUpdate(ctx context.Context, force bool) (map[string]any, error) {
-	repo := strings.TrimSpace(a.cfg.UpdateRepo)
-	asset := strings.TrimSpace(a.cfg.UpdateAsset)
-	service := strings.TrimSpace(a.cfg.ServiceName)
-	if repo == "" || asset == "" || service == "" {
-		return nil, errors.New("update repo, asset, or service name not configured")
-	}
-
-	if !force {
-		info, err := a.checkUpdate(ctx)
-		if err != nil {
-			return nil, err
+func (a *Agent) tableSelect(ctx context.Context, table string, columns []string, filters map[string]any, orderBy []db.OrderBy, limit *int, offset *int) (map[string]any, error) {
+	if a.cfg.SourceMode == "api" {
+		if a.api == nil {
+			return nil, errors.New("api client is not configured")
 		}
-		if update, ok := info["update"].(bool); ok && !update {
-			return map[string]any{"started": false, "reason": "up-to-date"}, nil
-		}
+		return a.api.TableSelect(ctx, table, columns, filters, orderBy, limit, offset)
 	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, err
+	if a.db == nil {
+		return nil, errors.New("database is not configured")
 	}
-	baseDir := filepath.Dir(exe)
-	updaterPath := filepath.Join(baseDir, "updater.exe")
-
-	if _, err := os.Stat(updaterPath); err != nil {
-		return nil, errors.New("updater.exe not found in agent folder")
-	}
-
-	args := []string{
-		"--repo", repo,
-		"--asset", asset,
-		"--service", service,
-		"--dir", baseDir,
-		"--log", filepath.Join(baseDir, "updater.log"),
-	}
-
-	cmd := exec.Command(updaterPath, args...)
-	cmd.Dir = baseDir
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	go func() {
-		// Allow the response to be sent, then exit to release the exe file.
-		time.Sleep(750 * time.Millisecond)
-		os.Exit(0)
-	}()
-
-	if force {
-		return map[string]any{"started": true, "force": true}, nil
-	}
-	return map[string]any{"started": true}, nil
+	return db.TableSelect(ctx, a.db, table, columns, filters, orderBy, limit, offset)
 }
 
-func normalizeVersion(v string) string {
-	v = strings.TrimSpace(v)
-	v = strings.TrimPrefix(v, "v")
-	return v
+func (a *Agent) tableInsert(ctx context.Context, table string, values map[string]any) (map[string]any, error) {
+	if a.cfg.SourceMode == "api" {
+		if a.api == nil {
+			return nil, errors.New("api client is not configured")
+		}
+		return a.api.TableInsert(ctx, table, values, a.cfg.AllowWrite)
+	}
+	if a.db == nil {
+		return nil, errors.New("database is not configured")
+	}
+	return db.TableInsert(ctx, a.db, table, values, a.cfg.AllowWrite)
+}
+
+func (a *Agent) tableUpdate(ctx context.Context, table string, values map[string]any, filters map[string]any) (map[string]any, error) {
+	if a.cfg.SourceMode == "api" {
+		if a.api == nil {
+			return nil, errors.New("api client is not configured")
+		}
+		return a.api.TableUpdate(ctx, table, values, filters, a.cfg.AllowWrite)
+	}
+	if a.db == nil {
+		return nil, errors.New("database is not configured")
+	}
+	return db.TableUpdate(ctx, a.db, table, values, filters, a.cfg.AllowWrite)
+}
+
+func (a *Agent) tableDelete(ctx context.Context, table string, filters map[string]any) (map[string]any, error) {
+	if a.cfg.SourceMode == "api" {
+		if a.api == nil {
+			return nil, errors.New("api client is not configured")
+		}
+		return a.api.TableDelete(ctx, table, filters, a.cfg.AllowWrite)
+	}
+	if a.db == nil {
+		return nil, errors.New("database is not configured")
+	}
+	return db.TableDelete(ctx, a.db, table, filters, a.cfg.AllowWrite)
 }
 
 func (a *Agent) logJSON(label string, payload any) {
