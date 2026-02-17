@@ -26,8 +26,7 @@ if (Test-Path $tmpDir) {
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
 
 $files = @(
-  "ekiben-agent.exe",
-  "agent-config.example.json"
+  "ekiben-agent.exe"
 )
 
 foreach ($file in $files) {
@@ -37,6 +36,13 @@ foreach ($file in $files) {
   }
   Copy-Item $src (Join-Path $tmpDir $file) -Force
 }
+
+# Copy example config as agent-config.json
+$exampleSrc = Join-Path $agentPath "agent-config.example.json"
+if (-not (Test-Path $exampleSrc)) {
+  Write-Error "Missing required file: $exampleSrc"
+}
+Copy-Item $exampleSrc (Join-Path $tmpDir "agent-config.json") -Force
 
 $zipPath = Join-Path $root $Output
 if (Test-Path $zipPath) {
