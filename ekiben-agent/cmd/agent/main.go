@@ -83,20 +83,28 @@ func main() {
 	ag := agent.New(cfg, sqlDB, apiClient, log)
 
 	var shutdownOnce sync.Once
-	shutdown := func() {
+	shutdown := func(reason console.ShutdownReason) {
 		shutdownOnce.Do(func() {
 			log.Infof("Gracefully shutting down...")
 			time.Sleep(500 * time.Millisecond)
 			log.Infof("Finishing in-flight writes...")
 			ag.BeginShutdown()
-			if ok := ag.WaitForInflight(10 * time.Second); !ok {
+			waitTimeout := 10 * time.Second
+			if reason == console.ShutdownClose {
+				waitTimeout = 2 * time.Second
+			}
+			if ok := ag.WaitForInflight(waitTimeout); !ok {
 				log.Warnf("Timed out waiting for in-flight work")
 			}
 			time.Sleep(500 * time.Millisecond)
 			log.Infof("Closing websocket connections...")
 			time.Sleep(500 * time.Millisecond)
 			log.Infof("Exiting...")
-			time.Sleep(3 * time.Second)
+			exitDelay := 3 * time.Second
+			if reason == console.ShutdownClose {
+				exitDelay = 1 * time.Second
+			}
+			time.Sleep(exitDelay)
 			os.Exit(0)
 		})
 	}
@@ -107,7 +115,7 @@ func main() {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		shutdown()
+		shutdown(console.ShutdownCtrlC)
 	}()
 
 	if err := ag.Run(ctx); err != nil {

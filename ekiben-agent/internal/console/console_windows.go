@@ -12,6 +12,13 @@ var shutdownHandler func()
 var consoleCtrlHandler uintptr
 var instanceHandle windows.Handle
 
+type ShutdownReason int
+
+const (
+	ShutdownCtrlC ShutdownReason = iota
+	ShutdownClose
+)
+
 // EnableANSI enables ANSI escape processing for the current console.
 func EnableANSI() bool {
 	h := windows.Handle(windows.Stdout)
@@ -38,14 +45,28 @@ func SetTitle(title string) {
 }
 
 // RegisterShutdown registers a handler for console close events.
-func RegisterShutdown(handler func()) {
-	shutdownHandler = handler
+func RegisterShutdown(handler func(ShutdownReason)) {
+	shutdownHandler = nil
+	wrapped := func(reason ShutdownReason) {
+		handler(reason)
+	}
+	_ = wrapped
+	// Keep handler for callback
+	shutdownHandler = func() {
+		// default to close unless overridden in callback
+		wrapped(ShutdownClose)
+	}
 	if consoleCtrlHandler == 0 {
 		consoleCtrlHandler = windows.NewCallback(func(ctrlType uint32) uintptr {
 			switch ctrlType {
-			case windows.CTRL_C_EVENT, windows.CTRL_CLOSE_EVENT, windows.CTRL_LOGOFF_EVENT, windows.CTRL_SHUTDOWN_EVENT:
-				if shutdownHandler != nil {
-					shutdownHandler()
+			case windows.CTRL_C_EVENT:
+				if handler != nil {
+					handler(ShutdownCtrlC)
+				}
+				return 1
+			case windows.CTRL_CLOSE_EVENT, windows.CTRL_LOGOFF_EVENT, windows.CTRL_SHUTDOWN_EVENT:
+				if handler != nil {
+					handler(ShutdownClose)
 				}
 				return 1
 			default:

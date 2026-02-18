@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,6 +160,10 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			// Log successful connection on first message
 			if !connected {
 				a.logger.Infof("Connected to %s successfully", controllerType)
+				a.logActiveEvents()
+				a.logger.Infof("Checking for custom songs")
+				time.Sleep(500 * time.Millisecond)
+				a.logger.Infof("%s Custom songs found", a.logger.Accent("0"))
 				connected = true
 			}
 			
@@ -193,6 +201,53 @@ func (a *Agent) closeConn() {
 		_ = a.conn.Close()
 	}
 	a.connMu.Unlock()
+}
+
+type eventFolderEntry struct {
+	FolderID int `json:"folderId"`
+}
+
+func (a *Agent) logActiveEvents() {
+	if a.cfg.DBPath == "" {
+		return
+	}
+
+	baseDir := filepath.Dir(a.cfg.DBPath)
+	filePath := filepath.Join(baseDir, "data", "event_folder_data.json")
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		a.logger.Warnf("Could not load active events")
+		return
+	}
+
+	var entries []eventFolderEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		a.logger.Warnf("Could not load active events")
+		return
+	}
+
+	ids := make([]int, 0, len(entries))
+	seen := make(map[int]struct{}, len(entries))
+	for _, entry := range entries {
+		if _, ok := seen[entry.FolderID]; ok {
+			continue
+		}
+		seen[entry.FolderID] = struct{}{}
+		ids = append(ids, entry.FolderID)
+	}
+	sort.Ints(ids)
+
+	if len(ids) == 0 {
+		a.logger.Infof("Events active: none")
+		return
+	}
+
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, a.logger.Accent(strconv.Itoa(id)))
+	}
+
+	a.logger.Infof("Events active: %s", strings.Join(parts, ", "))
 }
 
 type readResult struct {
