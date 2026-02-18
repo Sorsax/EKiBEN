@@ -12,3 +12,6 @@ func SetTitle(title string) {}
 
 // RegisterShutdown is a no-op on non-Windows builds.
 func RegisterShutdown(handler func()) {}
+
+// EnsureSingleInstance always returns true on non-Windows builds.
+func EnsureSingleInstance(name string) (bool, error) { return true, nil }

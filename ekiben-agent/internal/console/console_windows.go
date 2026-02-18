@@ -10,6 +10,7 @@ import (
 
 var shutdownHandler func()
 var consoleCtrlHandler uintptr
+var instanceHandle windows.Handle
 
 // EnableANSI enables ANSI escape processing for the current console.
 func EnableANSI() bool {
@@ -55,4 +56,25 @@ func RegisterShutdown(handler func()) {
 	kernel32 := windows.NewLazySystemDLL("kernel32.dll")
 	proc := kernel32.NewProc("SetConsoleCtrlHandler")
 	_, _, _ = proc.Call(consoleCtrlHandler, 1)
+}
+
+// EnsureSingleInstance returns true if this is the first instance.
+func EnsureSingleInstance(name string) (bool, error) {
+	ptr, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return false, err
+	}
+	h, err := windows.CreateMutex(nil, false, ptr)
+	if err != nil {
+		if err == windows.ERROR_ALREADY_EXISTS {
+			return false, nil
+		}
+		return false, err
+	}
+	if windows.GetLastError() == windows.ERROR_ALREADY_EXISTS {
+		_ = windows.CloseHandle(h)
+		return false, nil
+	}
+	instanceHandle = h
+	return true, nil
 }

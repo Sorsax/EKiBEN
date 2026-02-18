@@ -23,6 +23,16 @@ func main() {
 	useColor := console.EnableANSI()
 	log := logger.New(os.Stdout, cfg.LogTraffic, useColor)
 	console.SetTitle("EKiBEN Agent [" + version.Version + "]")
+	var err error
+	printLine := func(fn func(string, ...interface{}), delay time.Duration, format string, args ...interface{}) {
+		fn(format, args...)
+		time.Sleep(delay)
+	}
+
+	ok, err := console.EnsureSingleInstance("Global\\EKiBEN-Agent")
+	if err != nil {
+		log.Warnf("Single-instance check failed: %v", err)
+	}
 
 	// Determine environment from version
 	environment := "Development"
@@ -34,8 +44,14 @@ func main() {
 	log.Headerf("EKiBEN Agent version %s", log.Accent(version.Version))
 	log.Headerf("Environment: %s", log.Accent(environment))
 	log.Infof("Agent starting up...")
-	log.Infof("DB path: %s", log.Accent(cfg.DBPath))
-	log.Infof("Press Ctrl+C to shut down")
+	time.Sleep(250 * time.Millisecond)
+	if err == nil && !ok {
+		printLine(log.Warnf, 250*time.Millisecond, "Multiple instances detected, exiting...")
+		time.Sleep(3 * time.Second)
+		return
+	}
+	printLine(log.Infof, 250*time.Millisecond, "DB path: %s", log.Accent(cfg.DBPath))
+	printLine(log.Infof, 250*time.Millisecond, "Press Ctrl+C to shut down")
 
 	cfg.SourceMode = strings.TrimSpace(strings.ToLower(cfg.SourceMode))
 
@@ -45,8 +61,6 @@ func main() {
 
 	var sqlDB *sql.DB
 	var apiClient *db.APIClient
-	var err error
-
 	switch cfg.SourceMode {
 	case "direct":
 		sqlDB, err = db.Open(cfg.DBPath)
@@ -71,7 +85,7 @@ func main() {
 	var shutdownOnce sync.Once
 	shutdown := func() {
 		shutdownOnce.Do(func() {
-			log.Infof("Shutting down...")
+			log.Infof("Gracefully shutting down...")
 			time.Sleep(500 * time.Millisecond)
 			log.Infof("Finishing in-flight writes...")
 			ag.BeginShutdown()
