@@ -41,8 +41,10 @@ func main() {
 	}
 
 	// Print startup banner
+	log.Headerf("===============================")
 	log.Headerf("EKiBEN Agent version %s", log.Accent(version.Version))
 	log.Headerf("Environment: %s", log.Accent(environment))
+	log.Headerf("===============================")
 	log.Infof("Agent starting up...")
 	time.Sleep(250 * time.Millisecond)
 	if err == nil && !ok {

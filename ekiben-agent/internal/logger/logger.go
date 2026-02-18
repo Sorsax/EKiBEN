@@ -22,6 +22,7 @@ const (
 	colorDebug   = "\x1b[36m" // cyan
 	colorTraffic = "\x1b[35m" // magenta
 	colorAccent  = "\x1b[33m" // yellow
+	colorGreen   = "\x1b[32m" // green
 	colorReset   = "\x1b[0m"
 )
 
@@ -44,6 +45,13 @@ func (l *Logger) Accent(text string) string {
 		return text
 	}
 	return colorAccent + text + colorReset
+}
+
+func (l *Logger) Green(text string) string {
+	if !l.useColor {
+		return text
+	}
+	return colorGreen + text + colorReset
 }
 
 func (l *Logger) Infof(format string, args ...interface{}) {

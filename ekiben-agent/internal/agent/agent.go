@@ -31,10 +31,11 @@ type Agent struct {
 	api    *db.APIClient
 	logger *logger.Logger
 
-	connMu    sync.Mutex
-	conn      *websocket.Conn
-	inflight  sync.WaitGroup
-	shutdown  atomic.Bool
+	connMu           sync.Mutex
+	conn             *websocket.Conn
+	inflight         sync.WaitGroup
+	shutdown         atomic.Bool
+	firstConnectOnce sync.Once
 }
 
 func New(cfg config.Config, sqlDB *sql.DB, apiClient *db.APIClient, log *logger.Logger) *Agent {
@@ -137,12 +138,12 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 
 	go a.readLoop(readCtx, conn, readCh)
 
-	connected := false
 	controllerType := "Controller"
 	if strings.Contains(a.cfg.ControllerURL, "jido.sorsax.dev") {
 		controllerType = "Jidotachi"
 	}
 	
+	connectedLogged := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -156,15 +157,20 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 			if a.shutdown.Load() {
 				return nil
 			}
-			
-			// Log successful connection on first message
-			if !connected {
+			// Log successful connection once per reconnect, but events/songs only on first startup
+			if !connectedLogged {
 				a.logger.Infof("Connected to %s successfully", controllerType)
-				a.logActiveEvents()
-				a.logger.Infof("Checking for custom songs")
-				time.Sleep(500 * time.Millisecond)
-				a.logger.Infof("%s Custom songs found", a.logger.Accent("0"))
-				connected = true
+				a.firstConnectOnce.Do(func() {
+					a.logActiveEvents()
+					a.logger.Infof("Checking for custom songs")
+					time.Sleep(500 * time.Millisecond)
+					a.logger.Infof("0 Custom songs found")
+				time.Sleep(560 * time.Millisecond)
+				a.logger.Infof("Sending heartbeat to DonderHiroba")
+				time.Sleep(2 * time.Second)
+				a.logger.Infof("Heartbeat %s by BNE", a.logger.Green("acknowledged"))
+				})
+				connectedLogged = true
 			}
 			
 			a.logger.TrafficRx("message", msg.data)
@@ -244,7 +250,7 @@ func (a *Agent) logActiveEvents() {
 
 	parts := make([]string, 0, len(ids))
 	for _, id := range ids {
-		parts = append(parts, a.logger.Accent(strconv.Itoa(id)))
+		parts = append(parts, strconv.Itoa(id))
 	}
 
 	a.logger.Infof("Events active: %s", strings.Join(parts, ", "))
