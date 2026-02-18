@@ -15,6 +15,21 @@ if (-not (Test-Path $agentPath)) {
 Write-Host "Building ekiben-agent.exe..."
 Push-Location $agentPath
 
+$iconPath = Join-Path $agentPath "icon.ico"
+if (Test-Path $iconPath) {
+  Write-Host "Generating icon resources..."
+  $sysoPath = Join-Path $agentPath "cmd\agent\app.syso"
+  $arch = $env:GOARCH
+  if (-not $arch) {
+    $arch = (go env GOARCH)
+  }
+  Get-ChildItem -Path (Join-Path $agentPath "cmd\agent") -Filter "*.syso" -ErrorAction SilentlyContinue | Remove-Item -Force
+  go run github.com/tc-hib/go-winres@latest simply --icon $iconPath --manifest cli --out $sysoPath --arch $arch
+  if (-not (Test-Path $sysoPath) -and -not (Test-Path ("$sysoPath`_windows_$arch.syso"))) {
+    Write-Error "Icon resource generation failed: no .syso was created for $arch"
+  }
+}
+
 go build -o ekiben-agent.exe ./cmd/agent
 
 Pop-Location

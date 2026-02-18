@@ -2,12 +2,15 @@
 /taiko.db3
 /exported_all_db
 database.md
+taiko.db3-shm
+taiko.db3-wal
 
 #build artifacts
 /ekiben-agent/ekiben-agent.exe
 /ekiben-agent/traffic.log
 /ekiben-agent/ekiben-agent.exe~
 ekiben-agent.zip
+/ekiben-agent/cmd/agent/*.syso
 
 #configuration
 /ekiben-agent/agent-config.json
