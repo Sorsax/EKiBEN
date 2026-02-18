@@ -80,3 +80,7 @@ type DanUpdateParams struct {
 type DanRemoveParams struct {
 	DanID int `json:"danId"`
 }
+
+type ConfigSetParams struct {
+	Config map[string]any `json:"config"`
+}

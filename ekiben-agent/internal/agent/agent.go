@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -78,6 +80,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		err := a.connectOnce(ctx)
 		if err != nil {
 			a.logger.Warnf("Connection failed: %v", err)
+		}
+		if a.shutdown.Load() {
+			return nil
 		}
 		
 		// Only log if we're reconnecting
@@ -415,6 +420,52 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 			break
 		}
 		resp.Result = map[string]any{"ok": true, "dans": dans, "count": len(dans)}
+	case "system.shutdown":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		if err := a.triggerSystemAction(systemActionShutdown); err != nil {
+			resp.Error = &protocol.Error{Code: "system_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true}
+	case "system.restart":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		if err := a.triggerSystemAction(systemActionRestart); err != nil {
+			resp.Error = &protocol.Error{Code: "system_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true}
+	case "config.get":
+		cfg, err := a.readAgentConfig()
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "config_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"config": cfg}
+	case "config.set":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.ConfigSetParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		if len(params.Config) == 0 {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: "config is required"}
+			break
+		}
+		if err := a.writeAgentConfig(params.Config); err != nil {
+			resp.Error = &protocol.Error{Code: "config_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "restartRequired": true}
 	case "query":
 		var params protocol.QueryParams
 		if err := json.Unmarshal(env.Params, &params); err != nil {
@@ -898,4 +949,79 @@ func (a *Agent) removeDan(danID int) ([]danDataEntry, error) {
 	}
 
 	return dans, nil
+}
+
+type systemAction int
+
+const (
+	systemActionShutdown systemAction = iota
+	systemActionRestart
+)
+
+func (a *Agent) triggerSystemAction(action systemAction) error {
+	if runtime.GOOS != "windows" {
+		return errors.New("system action is only supported on windows")
+	}
+
+	args := []string{"/s", "/t", "0"}
+	if action == systemActionRestart {
+		args = []string{"/r", "/t", "0"}
+	}
+
+	// Run asynchronously so the response can be sent before shutdown/restart.
+	go func() {
+		_ = exec.Command("shutdown", args...).Run()
+	}()
+
+	return nil
+}
+
+func (a *Agent) agentConfigPath() (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(exePath), "agent-config.json"), nil
+}
+
+func (a *Agent) readAgentConfig() (map[string]any, error) {
+	path, err := a.agentConfigPath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	data = stripUTF8BOM(data)
+
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return map[string]any{}, nil
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+func (a *Agent) writeAgentConfig(cfg map[string]any) error {
+	path, err := a.agentConfigPath()
+	if err != nil {
+		return err
+	}
+
+	content, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+
+	return os.WriteFile(path, content, 0o644)
 }
