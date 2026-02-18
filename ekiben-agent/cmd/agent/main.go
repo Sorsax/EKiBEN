@@ -22,7 +22,7 @@ func main() {
 	cfg := config.FromFlags()
 	useColor := console.EnableANSI()
 	log := logger.New(os.Stdout, cfg.LogTraffic, useColor)
-	console.SetTitle("EKiBEN Agent")
+	console.SetTitle("EKiBEN Agent [" + version.Version + "]")
 
 	// Determine environment from version
 	environment := "Development"
