@@ -85,8 +85,11 @@ func main() {
 	ag := agent.New(cfg, sqlDB, apiClient, log)
 
 	var shutdownOnce sync.Once
+	shutdownStarted := make(chan struct{})
+	shutdownDone := make(chan struct{})
 	shutdown := func(reason console.ShutdownReason) {
 		shutdownOnce.Do(func() {
+			close(shutdownStarted)
 			log.Infof("Gracefully shutting down...")
 			time.Sleep(500 * time.Millisecond)
 			log.Infof("Finishing in-flight writes...")
@@ -107,6 +110,7 @@ func main() {
 				exitDelay = 1 * time.Second
 			}
 			time.Sleep(exitDelay)
+			close(shutdownDone)
 			os.Exit(0)
 		})
 	}
@@ -122,5 +126,11 @@ func main() {
 
 	if err := ag.Run(ctx); err != nil {
 		log.Fatalf("agent exited: %v", err)
+	}
+
+	select {
+	case <-shutdownStarted:
+		<-shutdownDone
+	default:
 	}
 }
