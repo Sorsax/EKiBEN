@@ -166,9 +166,9 @@ func (a *Agent) connectOnce(ctx context.Context) error {
 					time.Sleep(500 * time.Millisecond)
 					a.logger.Infof("0 Custom songs found")
 				time.Sleep(560 * time.Millisecond)
-				a.logger.Infof("Sending heartbeat to DonderHiroba")
+				a.logger.Infof("Sending heartbeat to DonderHiroba (BNE)")
 				time.Sleep(2 * time.Second)
-				a.logger.Infof("Heartbeat %s by BNE", a.logger.Green("acknowledged"))
+				a.logger.Infof("Heartbeat %s by DonderHiroba (BNE)", a.logger.Green("acknowledged"))
 				})
 				connectedLogged = true
 			}
@@ -213,6 +213,13 @@ type eventFolderEntry struct {
 	FolderID int `json:"folderId"`
 }
 
+func stripUTF8BOM(data []byte) []byte {
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		return data[3:]
+	}
+	return data
+}
+
 func (a *Agent) logActiveEvents() {
 	if a.cfg.DBPath == "" {
 		return
@@ -225,6 +232,7 @@ func (a *Agent) logActiveEvents() {
 		a.logger.Warnf("Could not load active events")
 		return
 	}
+	data = stripUTF8BOM(data)
 
 	var entries []eventFolderEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
@@ -295,6 +303,118 @@ func (a *Agent) handleMessage(ctx context.Context, conn *websocket.Conn, data []
 		resp.Result = map[string]any{"pong": true, "version": version.Version}
 	case "version.get":
 		resp.Result = map[string]any{"version": version.Version}
+	case "agent.version":
+		resp.Result = version.Version
+	case "movie.list":
+		movies, err := a.readMovieData()
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "movie_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"movies": movies, "count": len(movies)}
+	case "movie.add":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.MovieAddParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		movies, err := a.addMovie(params.MovieID, params.EnableDays)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "movie_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "movies": movies, "count": len(movies)}
+	case "movie.update":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.MovieUpdateParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		movies, err := a.updateMovie(params.MovieID, params.EnableDays)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "movie_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "movies": movies, "count": len(movies)}
+	case "movie.remove":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.MovieRemoveParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		movies, err := a.removeMovie(params.MovieID)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "movie_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "movies": movies, "count": len(movies)}
+	case "dan.list":
+		dans, err := a.readDanData()
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "dan_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"dans": dans, "count": len(dans)}
+	case "dan.add":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.DanAddParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		dans, err := a.addDan(params.Entry)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "dan_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "dans": dans, "count": len(dans)}
+	case "dan.update":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.DanUpdateParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		dans, err := a.updateDan(params.DanID, params.Entry)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "dan_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "dans": dans, "count": len(dans)}
+	case "dan.remove":
+		if !a.cfg.AllowWrite {
+			resp.Error = &protocol.Error{Code: "forbidden", Message: "write operations are disabled"}
+			break
+		}
+		var params protocol.DanRemoveParams
+		if err := json.Unmarshal(env.Params, &params); err != nil {
+			resp.Error = &protocol.Error{Code: "bad_params", Message: err.Error()}
+			break
+		}
+		dans, err := a.removeDan(params.DanID)
+		if err != nil {
+			resp.Error = &protocol.Error{Code: "dan_data_error", Message: err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"ok": true, "dans": dans, "count": len(dans)}
 	case "query":
 		var params protocol.QueryParams
 		if err := json.Unmarshal(env.Params, &params); err != nil {
@@ -446,4 +566,336 @@ func (a *Agent) tableDelete(ctx context.Context, table string, filters map[strin
 		return nil, errors.New("database is not configured")
 	}
 	return db.TableDelete(ctx, a.db, table, filters, a.cfg.AllowWrite)
+}
+
+type movieDataEntry struct {
+	MovieID    int `json:"movie_id"`
+	EnableDays int `json:"enable_days"`
+}
+
+func (a *Agent) movieDataPath() string {
+	baseDir := filepath.Dir(a.cfg.DBPath)
+	return filepath.Join(baseDir, "data", "movie_data.json")
+}
+
+func (a *Agent) readMovieData() ([]movieDataEntry, error) {
+	if a.cfg.DBPath == "" {
+		return nil, errors.New("db path is not configured")
+	}
+
+	filePath := a.movieDataPath()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []movieDataEntry{}, nil
+		}
+		return nil, err
+	}
+	data = stripUTF8BOM(data)
+
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return []movieDataEntry{}, nil
+	}
+
+	var movies []movieDataEntry
+	if err := json.Unmarshal(data, &movies); err != nil {
+		return nil, err
+	}
+
+	return movies, nil
+}
+
+func (a *Agent) writeMovieData(movies []movieDataEntry) error {
+	if a.cfg.DBPath == "" {
+		return errors.New("db path is not configured")
+	}
+
+	filePath := a.movieDataPath()
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return err
+	}
+
+	content, err := json.MarshalIndent(movies, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+
+	return os.WriteFile(filePath, content, 0o644)
+}
+
+func (a *Agent) addMovie(movieID int, enableDays int) ([]movieDataEntry, error) {
+	movies, err := a.readMovieData()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, movie := range movies {
+		if movie.MovieID == movieID {
+			return nil, errors.New("movie_id already exists")
+		}
+	}
+
+	movies = append(movies, movieDataEntry{MovieID: movieID, EnableDays: enableDays})
+	sort.Slice(movies, func(i, j int) bool { return movies[i].MovieID < movies[j].MovieID })
+
+	if err := a.writeMovieData(movies); err != nil {
+		return nil, err
+	}
+
+	return movies, nil
+}
+
+func (a *Agent) updateMovie(movieID int, enableDays int) ([]movieDataEntry, error) {
+	movies, err := a.readMovieData()
+	if err != nil {
+		return nil, err
+	}
+
+	updated := false
+	for i := range movies {
+		if movies[i].MovieID == movieID {
+			movies[i].EnableDays = enableDays
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		return nil, errors.New("movie_id not found")
+	}
+
+	if err := a.writeMovieData(movies); err != nil {
+		return nil, err
+	}
+
+	return movies, nil
+}
+
+func (a *Agent) removeMovie(movieID int) ([]movieDataEntry, error) {
+	movies, err := a.readMovieData()
+	if err != nil {
+		return nil, err
+	}
+
+	index := -1
+	for i := range movies {
+		if movies[i].MovieID == movieID {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return nil, errors.New("movie_id not found")
+	}
+
+	movies = append(movies[:index], movies[index+1:]...)
+
+	if err := a.writeMovieData(movies); err != nil {
+		return nil, err
+	}
+
+	return movies, nil
+}
+
+type danDataEntry map[string]any
+
+func (a *Agent) danDataPath() string {
+	baseDir := filepath.Dir(a.cfg.DBPath)
+	return filepath.Join(baseDir, "data", "dan_data.json")
+}
+
+func (a *Agent) readDanData() ([]danDataEntry, error) {
+	if a.cfg.DBPath == "" {
+		return nil, errors.New("db path is not configured")
+	}
+
+	filePath := a.danDataPath()
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []danDataEntry{}, nil
+		}
+		return nil, err
+	}
+	data = stripUTF8BOM(data)
+
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return []danDataEntry{}, nil
+	}
+
+	var dans []danDataEntry
+	if err := json.Unmarshal(data, &dans); err != nil {
+		return nil, err
+	}
+
+	return dans, nil
+}
+
+func (a *Agent) writeDanData(dans []danDataEntry) error {
+	if a.cfg.DBPath == "" {
+		return errors.New("db path is not configured")
+	}
+
+	filePath := a.danDataPath()
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return err
+	}
+
+	content, err := json.MarshalIndent(dans, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+
+	return os.WriteFile(filePath, content, 0o644)
+}
+
+func readDanID(entry map[string]any) (int, error) {
+	value, ok := entry["danId"]
+	if !ok {
+		return 0, errors.New("entry.danId is required")
+	}
+
+	switch v := value.(type) {
+	case float64:
+		return int(v), nil
+	case int:
+		return v, nil
+	case int32:
+		return int(v), nil
+	case int64:
+		return int(v), nil
+	case json.Number:
+		n, err := strconv.Atoi(v.String())
+		if err != nil {
+			return 0, errors.New("entry.danId must be an integer")
+		}
+		return n, nil
+	default:
+		return 0, errors.New("entry.danId must be an integer")
+	}
+}
+
+func (a *Agent) addDan(entry map[string]any) ([]danDataEntry, error) {
+	if len(entry) == 0 {
+		return nil, errors.New("entry is required")
+	}
+
+	danID, err := readDanID(entry)
+	if err != nil {
+		return nil, err
+	}
+
+	dans, err := a.readDanData()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, dan := range dans {
+		existingID, err := readDanID(dan)
+		if err != nil {
+			continue
+		}
+		if existingID == danID {
+			return nil, errors.New("danId already exists")
+		}
+	}
+
+	entryCopy := make(danDataEntry, len(entry))
+	for key, value := range entry {
+		entryCopy[key] = value
+	}
+	entryCopy["danId"] = danID
+
+	dans = append(dans, entryCopy)
+	sort.Slice(dans, func(i, j int) bool {
+		leftID, _ := readDanID(dans[i])
+		rightID, _ := readDanID(dans[j])
+		return leftID < rightID
+	})
+
+	if err := a.writeDanData(dans); err != nil {
+		return nil, err
+	}
+
+	return dans, nil
+}
+
+func (a *Agent) updateDan(danID int, entry map[string]any) ([]danDataEntry, error) {
+	if len(entry) == 0 {
+		return nil, errors.New("entry is required")
+	}
+
+	dans, err := a.readDanData()
+	if err != nil {
+		return nil, err
+	}
+
+	index := -1
+	for i := range dans {
+		existingID, err := readDanID(dans[i])
+		if err != nil {
+			continue
+		}
+		if existingID == danID {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return nil, errors.New("danId not found")
+	}
+
+	entryCopy := make(danDataEntry, len(entry)+1)
+	for key, value := range entry {
+		entryCopy[key] = value
+	}
+	entryCopy["danId"] = danID
+
+	dans[index] = entryCopy
+	sort.Slice(dans, func(i, j int) bool {
+		leftID, _ := readDanID(dans[i])
+		rightID, _ := readDanID(dans[j])
+		return leftID < rightID
+	})
+
+	if err := a.writeDanData(dans); err != nil {
+		return nil, err
+	}
+
+	return dans, nil
+}
+
+func (a *Agent) removeDan(danID int) ([]danDataEntry, error) {
+	dans, err := a.readDanData()
+	if err != nil {
+		return nil, err
+	}
+
+	index := -1
+	for i := range dans {
+		existingID, err := readDanID(dans[i])
+		if err != nil {
+			continue
+		}
+		if existingID == danID {
+			index = i
+			break
+		}
+	}
+
+	if index == -1 {
+		return nil, errors.New("danId not found")
+	}
+
+	dans = append(dans[:index], dans[index+1:]...)
+
+	if err := a.writeDanData(dans); err != nil {
+		return nil, err
+	}
+
+	return dans, nil
 }

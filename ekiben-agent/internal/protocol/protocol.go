@@ -53,3 +53,30 @@ type TableDeleteParams struct {
 	Table   string         `json:"table"`
 	Filters map[string]any `json:"filters"`
 }
+
+type MovieAddParams struct {
+	MovieID    int `json:"movie_id"`
+	EnableDays int `json:"enable_days"`
+}
+
+type MovieUpdateParams struct {
+	MovieID    int `json:"movie_id"`
+	EnableDays int `json:"enable_days"`
+}
+
+type MovieRemoveParams struct {
+	MovieID int `json:"movie_id"`
+}
+
+type DanAddParams struct {
+	Entry map[string]any `json:"entry"`
+}
+
+type DanUpdateParams struct {
+	DanID int            `json:"danId"`
+	Entry map[string]any `json:"entry"`
+}
+
+type DanRemoveParams struct {
+	DanID int `json:"danId"`
+}
