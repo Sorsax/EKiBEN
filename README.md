@@ -58,4 +58,4 @@ For copyright reasons, I will not provide any front-end assets. If you have a le
 ## Future Plans
 
 - Cross-machine player data: If multiple machines run EKiBEN, player data can sync (if both sides agree)
-- Custom song support: EKiBEN will have the capability to convert TJA and BMS files to the format used by the game. For legal reasons you should not use this on an actual cabinet, but it's there :P
+- Custom song support: EKiBEN will have the capability to   TJA, OSZ and BMS files to the format used by the game. For legal reasons you should not use this on an actual cabinet, but it's there :P
