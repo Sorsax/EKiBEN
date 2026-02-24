@@ -2,6 +2,8 @@
 
 ### A multi-purpose toolkit for a certain very sugoi taiko server
 
+## This readme is outdated, please don't read it :DD
+
 > [!WARNING]
 > Only use EKiBEN where it's allowed. If you run it on a vanilla network, which you definetly shouldn't, your machine might get banned. That's on you.
 
