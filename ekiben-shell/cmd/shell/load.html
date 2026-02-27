@@ -15,9 +15,14 @@
       background-color: #000;
     }
     .logo-container {
-      position: relative;
-      width: 400px;
-      height: 400px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     #Gear {
       transform-box: fill-box;
@@ -33,7 +38,7 @@
 <body>
   <div class="logo-container">
     <!-- Inline SVG direct DOMn -->
-    <svg width="815" height="334" viewBox="0 0 815 334" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg style="display:block;max-width:40vw;max-height:80vh;position:absolute;left:50%;top:50%;transform:translate(-50%,0);" width="100%" height="auto" viewBox="0 0 815 334" fill="none" xmlns="http://www.w3.org/2000/svg">
       <g id="logo-group">
         <g id="logo-text" filter="url(#filter0_d_285_55)">
           <path d="M472.464 274.689L471.065 251.403L482.869 250.694L478.671 180.836L466.866 181.546L465.467 158.26L522.873 154.81C547.615 153.323 561.736 164.159 562.892 183.402C563.631 195.692 556.821 203.891 542.51 208.809C560.864 211.763 569.474 220.009 570.446 236.18C571.69 256.879 559.301 269.471 534.722 270.948L472.464 274.689ZM510.271 201.658L519.65 201.094C529.191 200.521 533.819 196.51 533.362 188.91C532.905 181.31 527.83 177.882 518.289 178.455L508.91 179.019L510.271 201.658ZM513.109 248.877L522.488 248.313C533.646 247.642 539.033 242.774 538.479 233.557C537.935 224.502 531.822 220 520.826 220.661L511.447 221.225L513.109 248.877Z" fill="url(#paint0_linear_285_55)"/>

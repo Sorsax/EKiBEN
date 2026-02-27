@@ -18,6 +18,34 @@ ekiben-agent.zip
 #IDE
 /.vscode/
 
+
 #Other
 asd.txt
 INFO2.md
+
+# ekiben-shell build artifacts
+/ekiben-shell/ekiben-shell.exe
+/ekiben-shell/traffic.log
+/ekiben-shell/ekiben-shell.exe~
+/ekiben-shell/cmd/shell/*.syso
+
+# General Go/Windows build outputs
+*.exe
+*.dll
+*.obj
+*.pdb
+*.out
+*.log
+*.tmp
+*.bak
+*.swp
+bin/
+vendor/
+*.test
+*.coverprofile
+*.mod
+*.sum
+
+# OS files
+.DS_Store
+Thumbs.db
